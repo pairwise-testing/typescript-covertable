@@ -1,0 +1,68 @@
+name: typescript
+on:
+  push:
+    branches:
+      - master
+      - fix/*
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          package_json_file: typescript/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: install
+        run: pnpm install
+      - name: test
+        run: pnpm exec jest --coverage
+      - name: codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./typescript/coverage/lcov.info
+          flags: typescript
+          verbose: true
+
+  release:
+    needs: tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+
+    if: github.ref == 'refs/heads/master'
+    name: npm upload
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          package_json_file: typescript/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install -g npm@latest
+      - name: remove authToken from .npmrc
+        run: |
+          NPM_RC=$(npm config get userconfig)
+          sed -i '/_authToken/d' "$NPM_RC" 2>/dev/null || true
+      - name: publish
+        run: |
+          pnpm install
+          pnpm build
+          VERSION=$(node -p "require('./package.json').version")
+          TAG=$( [[ "$VERSION" == *-* ]] && echo "--tag next" || echo "" )
+          pnpm publish --access public --provenance $TAG --no-git-checks || true

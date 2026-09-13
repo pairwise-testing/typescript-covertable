@@ -1,0 +1,105 @@
+---
+sidebar_position: 1
+slug: /tools/pict
+title: "Compatible PICT"
+---
+
+import PictDemo from './pict';
+import BuyMeACoffee from './buy-me-a-coffee';
+
+# Compatible PICT Online
+
+A browser-based pairwise test case generator compatible with [Microsoft PICT](https://github.com/microsoft/pict) model format.
+Write your model, click Generate, and get optimized test combinations instantly — no installation required.
+
+:::tip[Prefer your editor?]
+The same engine is available as the [PICT VS Code extension](/tools/vscode) — syntax highlighting, diagnostics, and covering-array generation for `.pict` files.
+:::
+
+:::info[Privacy]
+All processing runs entirely in your browser. No data is sent to any server. Your model text is saved in the browser's session storage so it persists across page reloads, but it is automatically cleared when you close the tab.
+:::
+
+<PictDemo />
+
+:::warning[PICT superset]
+This tool uses CoverTable's model format, which is a **superset of Microsoft PICT**. It supports extensions such as arithmetic expressions (`[A] * [B] > 100`, `([A] + 1) * [B] <= 500`) and `#` comments in constraints. Models using these extensions may not run in the original PICT tool.
+:::
+
+---
+
+## How it works
+
+`PictModel` parses a PICT-format model into parameters, sub-models, and constraint filters, and lets you generate rows directly from it:
+
+```typescript
+import { PictModel } from "covertable/pict";
+
+const model = new PictModel(`
+machine: iPhone, Pixel, XPERIA, ZenFone, Galaxy
+os:      iOS, Android
+browser: FireFox, Chrome, Safari
+
+IF [machine] = "iPhone" THEN [os] = "iOS";
+IF [os] = "iOS" THEN [machine] = "iPhone";
+`);
+
+const rows = model.make();
+```
+
+If you only want to apply constraints to factors you already have in code, you can pass `model.constraints` to `make`:
+
+```typescript
+import { make } from "covertable";
+import { PictModel } from "covertable/pict";
+
+const machine = ["iPhone", "Pixel", "XPERIA", "ZenFone", "Galaxy"];
+const os = ["iOS", "Android"];
+const browser = ["FireFox", "Chrome", "Safari"];
+
+const model = new PictModel(`
+machine: iPhone, Pixel, XPERIA, ZenFone, Galaxy
+os:      iOS, Android
+browser: FireFox, Chrome, Safari
+
+IF [machine] = "iPhone" THEN [os] = "iOS";
+IF [os] = "iOS" THEN [machine] = "iPhone";
+`);
+
+make({ machine, os, browser }, {
+  constraints: model.constraints,
+});
+```
+
+## Supported Syntax
+
+`PictModel` supports the full PICT model file format. See the [PictModel reference](/reference/pict) for the complete table.
+
+### Constraints
+
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| `IF ... THEN ...` | `IF [os] = "iOS" THEN [machine] = "iPhone"` | Conditional constraint |
+| `IF ... THEN ... ELSE ...` | `IF [os] = "iOS" THEN [machine] = "iPhone" ELSE [machine] <> "iPhone"` | With else branch |
+| **Unconditional** | `[machine] <> [os];` | Always-applied invariant (no `IF`) |
+| `=` / `<>` | `[os] = "iOS"` / `[os] <> "Android"` | Equality / Inequality |
+| `>` / `<` / `>=` / `<=` | `[price] > 100` | Numeric comparisons |
+| `AND` / `OR` / `NOT` | `[os] = "iOS" AND [browser] = "Safari"` | Logical operators with parentheses |
+| `LIKE` | `[machine] LIKE "i*"` | Pattern matching with `*` and `?` (all other characters are literal) |
+| `IN` | `[os] IN {"iOS", "Android"}`, `[size] IN {512, 1024}` | Set membership (string or numeric sets) |
+
+### Parameters
+
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| **Basic** | `Type: A, B, C` | Standard parameter declaration |
+| **Quoted** | `Msg: "hello, world"` | Required for values with commas |
+| **Aliases** | `OS: Windows \| Win, Linux` | Multiple names for the same value |
+| **Invalid (`~`)** | `Type: A, ~Bad` | Negative-test value (at most one per row) |
+| **Weight** | `Browser: Chrome (10), Firefox` | Bias value selection during completion |
+| **Reference** | `B: <A>, extra` | Inherit values from another parameter |
+| **Sub-model** | `{ A, B, C } @ 3` or `{ A, B, C }` | Apply different N-wise strength to a group; `@ N` is optional (defaults to the global order) |
+
+---
+
+<BuyMeACoffee />

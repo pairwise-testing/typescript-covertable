@@ -1,0 +1,172 @@
+import {themes as prismThemes} from 'prism-react-renderer';
+import type {Config} from '@docusaurus/types';
+import type * as Preset from '@docusaurus/preset-classic';
+import path from 'path';
+
+const config: Config = {
+  title: 'CoverTable',
+  tagline: 'A flexible pairwise testing tool for generating covering arrays',
+  favicon: 'img/favicon.ico',
+
+  future: {
+    v4: true,
+  },
+
+  markdown: {
+    mermaid: true,
+  },
+  themes: ['@docusaurus/theme-mermaid'],
+
+  url: 'https://covertable.walkframe.com',
+  baseUrl: '/',
+
+  organizationName: 'walkframe',
+  projectName: 'covertable',
+
+  onBrokenLinks: 'throw',
+
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en'],
+  },
+
+  plugins: [
+    [
+      '@docusaurus/plugin-google-tag-manager',
+      {
+        containerId: 'GTM-WZFTP5F2',
+      },
+    ],
+    function covertablePlugin() {
+      return {
+        name: 'covertable-webpack-plugin',
+        configureWebpack(_config, isServer) {
+          return {
+            resolve: {
+              alias: {
+                'covertable/pict': path.resolve(__dirname, '../typescript/src/pict/index.ts'),
+                covertable: path.resolve(__dirname, '../typescript/src/index.ts'),
+              },
+            },
+            // The SA optimizer's parallel backend dynamically imports the
+            // Node-only `node:worker_threads`. It is never reached in the
+            // browser (the runtime picks the Web Worker backend), but the
+            // bundler still walks the chunk and chokes on the `node:` scheme.
+            // Mark it external in the client build so it is left as a bare
+            // (never-executed) require instead of being resolved.
+            ...(isServer
+              ? {}
+              : { externals: [{ 'node:worker_threads': 'commonjs node:worker_threads' }] }),
+          };
+        },
+      };
+    },
+  ],
+
+  presets: [
+    [
+      'classic',
+      {
+        docs: {
+          path: 'contents',
+          sidebarPath: './sidebars.ts',
+          routeBasePath: '/',
+          editUrl:
+            'https://github.com/walkframe/covertable/tree/master/docs/',
+        },
+        blog: false,
+        theme: {
+          customCss: './src/css/custom.css',
+        },
+      } satisfies Preset.Options,
+    ],
+  ],
+
+
+  themeConfig: {
+    image: 'img/covertable-social-card.png',
+    colorMode: {
+      respectPrefersColorScheme: true,
+    },
+    navbar: {
+      title: 'CoverTable',
+      items: [
+        {
+          href: 'https://www.npmjs.com/package/covertable',
+          label: 'npm',
+          position: 'right',
+        },
+        {
+          href: 'https://pypi.org/project/covertable/',
+          label: 'PyPI',
+          position: 'right',
+        },
+        {
+          href: 'https://github.com/walkframe/covertable',
+          label: 'GitHub',
+          position: 'right',
+        },
+      ],
+    },
+    footer: {
+      style: 'dark',
+      links: [
+        {
+          title: 'Docs',
+          items: [
+            {
+              label: 'Getting Started',
+              to: '/',
+            },
+            {
+              label: 'Reference',
+              to: '/reference',
+            },
+            {
+              label: 'Compatible PICT',
+              to: '/tools/pict',
+            },
+          ],
+        },
+        {
+          title: 'Links',
+          items: [
+            {
+              label: 'GitHub',
+              href: 'https://github.com/walkframe/covertable',
+            },
+            {
+              label: 'npm',
+              href: 'https://www.npmjs.com/package/covertable',
+            },
+            {
+              label: 'PyPI',
+              href: 'https://pypi.org/project/covertable/',
+            },
+          ],
+        },
+        {
+          title: 'Legal',
+          items: [
+            {
+              label: 'About',
+              to: '/about',
+            },
+            {
+              label: 'Privacy Policy',
+              to: '/privacy-policy',
+            },
+          ],
+        },
+      ],
+      copyright: `Copyright &copy; ${new Date().getFullYear()} walkframe. Built with Docusaurus.`,
+    },
+    prism: {
+      theme: prismThemes.github,
+      darkTheme: prismThemes.dracula,
+      additionalLanguages: ['bash', 'typescript', 'javascript'],
+    },
+  } satisfies Preset.ThemeConfig,
+};
+
+export default config;

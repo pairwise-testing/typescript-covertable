@@ -1,6 +1,7 @@
-def extract(sorted_incompleted, row, parents, **kwargs):
-    for pair in sorted_incompleted:
-        storable = row.storable([(parents[p], p) for p in pair])
-        if storable is None:
+def extract(ctrl):
+    for pair_key, pair in list(ctrl.incomplete.items()):
+        cand = ctrl.get_candidate(pair)
+        storable = ctrl.storable(cand)
+        if storable is None or storable == 0:
             continue
         yield pair

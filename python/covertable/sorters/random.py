@@ -4,9 +4,5 @@
 import random
 
 
-def random_comparer(_):
-    return random.random()
-
-
-def sort(incompleted, *args, **kwargs):
-    return sorted(incompleted, key=random_comparer)
+def sort(pairs, **kwargs):
+    return sorted(pairs, key=lambda _: random.random())

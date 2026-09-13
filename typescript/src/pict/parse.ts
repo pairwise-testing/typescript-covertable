@@ -1,0 +1,219 @@
+import type { SubModelType } from '../types';
+import type { ColumnDescriptor, CommentBlock, PictFactorsType, PictModelIssue, SourceLine } from './types';
+import type { FormulaColumn } from './formula';
+import { isParameterLine, parseParameters } from './parameters';
+import { parseSubModel, subModelPattern } from './subModels';
+import { PictConstraintsLexer } from './constraints';
+
+export interface ParseOptions {
+  /** Match constraint comparisons and alias lookups case-insensitively. Default: true. */
+  caseInsensitive?: boolean;
+  /**
+   * Treat a parameter line whose value begins with `=` as a formula (computed)
+   * column. Default: true. When false, such lines are parsed as ordinary
+   * comma-separated parameters (the pre-formula behaviour).
+   */
+  formula?: boolean;
+}
+
+export interface ParseResult {
+  factors: PictFactorsType;
+  aliases: Map<string, string>;
+  negatives: Map<string, Set<string | number>>;
+  weights: { [factorKey: string]: { [index: number]: number } };
+  subModels: SubModelType[];
+  lexer: PictConstraintsLexer | null;
+  issues: PictModelIssue[];
+  /** Output columns in source-declaration order (parameters and formula columns). */
+  columns: ColumnDescriptor[];
+  /** Formula (computed) columns, in source-declaration order. */
+  formulaColumns: FormulaColumn[];
+  /** Comment blocks, each classified as a field description or freestanding. */
+  comments: CommentBlock[];
+}
+
+interface SplitSections {
+  parameterLines: SourceLine[];
+  subModelLines: SourceLine[];
+  constraintText: string;
+  constraintStartLine: number;
+}
+
+function splitSections(input: string): SplitSections {
+  const lines = input.split('\n');
+  const parameterLines: SourceLine[] = [];
+  const subModelLines: SourceLine[] = [];
+  let constraintStart = lines.length;
+
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i];
+    const trimmed = text.trim();
+    const lineNum = i + 1; // 1-based
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      parameterLines.push({ text, line: lineNum });
+      continue;
+    }
+    if (isParameterLine(trimmed)) {
+      parameterLines.push({ text, line: lineNum });
+    } else if (subModelPattern.test(trimmed)) {
+      subModelLines.push({ text: trimmed, line: lineNum });
+    } else {
+      constraintStart = i;
+      break;
+    }
+  }
+
+  return {
+    parameterLines,
+    subModelLines,
+    constraintText: lines.slice(constraintStart)
+      .map(l => l.trim().startsWith('#') ? '' : l)
+      .join('\n'),
+    constraintStartLine: constraintStart + 1,
+  };
+}
+
+/** Strip a leading `#` and one optional space from a comment line. */
+function stripComment(text: string): string {
+  return text.trim().replace(/^#\s?/, '');
+}
+
+/**
+ * Classify every comment (`#`) block in the model.
+ *
+ * A block is a maximal run of consecutive comment lines. It is **field-attached**
+ * (its `attachedTo` is the following parameter's key) when the very next line is
+ * a parameter line with no blank line between; otherwise it is **freestanding**
+ * (`attachedTo` = null). A blank line always ends a block and detaches it.
+ *
+ * This is the single source of truth for both prompt assembly (field-attached
+ * comments become per-field descriptions / the task on the output line) and the
+ * editor's syntax highlighting.
+ */
+export function classifyComments(input: string): CommentBlock[] {
+  const lines = input.split('\n');
+  const blocks: CommentBlock[] = [];
+  let pending: SourceLine[] = [];
+
+  const flush = (attachedTo: string | null) => {
+    if (pending.length === 0) {
+      return;
+    }
+    blocks.push({
+      lines: pending,
+      text: pending.map(l => stripComment(l.text)).join('\n'),
+      attachedTo,
+    });
+    pending = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i];
+    const trimmed = text.trim();
+    if (trimmed.startsWith('#')) {
+      pending.push({ text, line: i + 1 });
+    } else if (trimmed === '') {
+      // A blank line detaches any pending block.
+      flush(null);
+    } else if (isParameterLine(trimmed)) {
+      // Adjacent (no blank line) → describes this parameter.
+      flush(trimmed.slice(0, trimmed.indexOf(':')).trim());
+    } else {
+      // Sub-model / constraint / other → not a field description.
+      flush(null);
+    }
+  }
+  flush(null);
+  return blocks;
+}
+
+/**
+ * Parse a PICT-format model string into its constituent parts: parameters,
+ * sub-models, and constraints. Issues are collected rather than thrown so the
+ * caller can decide how to handle them.
+ */
+export function parse(input: string, options: ParseOptions = {}): ParseResult {
+  const { caseInsensitive = true, formula = true } = options;
+  const sections = splitSections(input);
+  const issues: PictModelIssue[] = [];
+
+  // Parameters
+  const { factors, aliases, negatives, weights, columns, formulaColumns, issues: paramIssues } =
+    parseParameters(sections.parameterLines, { formula });
+  issues.push(...paramIssues);
+
+  // Normalize alias keys for case-insensitive lookup
+  const lexerAliases = caseInsensitive
+    ? new Map(Array.from(aliases, ([k, v]) => [k.toLowerCase(), v]))
+    : aliases;
+
+  // Sub-models
+  const subModels: SubModelType[] = [];
+  sections.subModelLines.forEach(({ text, line }, subIndex) => {
+    const sub = parseSubModel(text);
+    if (sub) {
+      subModels.push(sub);
+    } else {
+      issues.push({
+        severity: "error",
+        source: "subModel",
+        index: subIndex,
+        line,
+        message: `Invalid sub-model definition: ${text}`,
+      });
+    }
+  });
+
+  // Constraints
+  let lexer: PictConstraintsLexer | null = null;
+  if (sections.constraintText.trim()) {
+    lexer = new PictConstraintsLexer(
+      sections.constraintText,
+      false,
+      lexerAliases,
+      caseInsensitive,
+      sections.constraintStartLine,
+    );
+    lexer.errors.forEach((err, constraintIndex) => {
+      if (err == null) return;
+      const line = lexer!.filterLines[constraintIndex] ?? sections.constraintStartLine;
+      issues.push({
+        severity: "error",
+        source: "constraint",
+        index: constraintIndex,
+        line,
+        message: err,
+      });
+    });
+
+    // Validate `[Field]` references against the declared parameters
+    // (case-insensitive). A typo'd field names no real parameter, so flag the
+    // exact `[...]` token — mirroring the formula-column check.
+    const knownFields = new Set(Object.keys(factors).map((k) => k.toLowerCase()));
+    lexer.refs.forEach((ref, refIndex) => {
+      if (knownFields.has(ref.key.toLowerCase())) return;
+      issues.push({
+        severity: "error",
+        source: "constraint",
+        index: refIndex,
+        line: ref.line,
+        column: ref.col + 1, // 1-based
+        length: ref.length,
+        message: `Unknown field reference "[${ref.key}]"`,
+      });
+    });
+  }
+
+  return {
+    factors,
+    aliases,
+    negatives,
+    weights,
+    subModels,
+    lexer,
+    issues,
+    columns,
+    formulaColumns,
+    comments: classifyComments(input),
+  };
+}

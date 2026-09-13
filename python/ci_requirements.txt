@@ -1,4 +1,5 @@
-tox
-setuptools
-wheel
+pytest
+pytest-cov
+codecov
+build
 twine
